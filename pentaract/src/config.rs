@@ -1,5 +1,7 @@
 use std::{env, str::FromStr};
 
+use crate::common::encryption::EncryptionKey;
+
 use super::errors::{PentaractError, PentaractResult};
 
 #[derive(Debug, Clone)]
@@ -19,6 +21,7 @@ pub struct Config {
 
     pub telegram_api_base_url: String,
     pub telegram_rate_limit: u8,
+    pub storage_encryption_key: EncryptionKey,
 }
 
 impl Config {
@@ -42,6 +45,8 @@ impl Config {
         let secret_key = Self::get_env_var("SECRET_KEY")?;
         let telegram_api_base_url = Self::get_env_var("TELEGRAM_API_BASE_URL")?;
         let telegram_rate_limit = Self::get_env_var_with_default("TELEGRAM_RATE_LIMIT", 18)?;
+        let storage_encryption_key =
+            EncryptionKey::from_hex(&Self::get_env_var::<String>("STORAGE_ENCRYPTION_KEY")?)?;
 
         Ok(Self {
             db_uri,
@@ -57,6 +62,7 @@ impl Config {
             secret_key,
             telegram_api_base_url,
             telegram_rate_limit,
+            storage_encryption_key,
         })
     }
 

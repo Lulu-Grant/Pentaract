@@ -33,6 +33,12 @@ pub enum PentaractError {
     InvalidPath,
     #[error("Invalid folder name")]
     InvalidFolderName,
+    #[error("Invalid encryption key")]
+    InvalidEncryptionKey,
+    #[error("File encryption failed")]
+    EncryptionError,
+    #[error("File decryption failed")]
+    DecryptionError,
     #[error("You cannot manage access of yourself")]
     CannotManageAccessOfYourself,
     #[error("Storage does not have workers")]
@@ -59,7 +65,8 @@ impl From<PentaractError> for (StatusCode, String) {
             PentaractError::DoesNotExist(_) => (StatusCode::NOT_FOUND, e.to_string()),
             PentaractError::HeaderMissed(_)
             | PentaractError::HeaderIsInvalid(..)
-            | PentaractError::InvalidFolderName => (StatusCode::BAD_REQUEST, e.to_string()),
+            | PentaractError::InvalidFolderName
+            | PentaractError::InvalidEncryptionKey => (StatusCode::BAD_REQUEST, e.to_string()),
             _ => {
                 tracing::error!("{e}");
                 (

@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::{
     common::{
         channels::{DownloadFileData, UploadFileData},
+        encryption::{EncryptionKey, FileCipher},
         telegram_api::bot_api::TelegramBotApi,
         types::ChatId,
     },
@@ -23,13 +24,20 @@ pub struct StorageManagerService<'d> {
     db: &'d PgPool,
     chunk_size: usize,
     rate_limit: u8,
+    cipher: FileCipher,
 }
 
 impl<'d> StorageManagerService<'d> {
-    pub fn new(db: &'d PgPool, telegram_baseurl: &'d str, rate_limit: u8) -> Self {
+    pub fn new(
+        db: &'d PgPool,
+        telegram_baseurl: &'d str,
+        rate_limit: u8,
+        encryption_key: EncryptionKey,
+    ) -> Self {
         let files_repo = FilesRepository::new(db);
         let storages_repo = StoragesRepository::new(db);
         let chunk_size = 20 * 1024 * 1024;
+        let cipher = FileCipher::new(encryption_key);
         Self {
             storages_repo,
             files_repo,
@@ -37,6 +45,7 @@ impl<'d> StorageManagerService<'d> {
             telegram_baseurl,
             db,
             rate_limit,
+            cipher,
         }
     }
 
@@ -79,9 +88,10 @@ impl<'d> StorageManagerService<'d> {
         bytes_chunk: &[u8],
     ) -> PentaractResult<FileChunk> {
         let scheduler = StorageWorkersScheduler::new(self.db, self.rate_limit);
+        let encrypted_chunk = self.cipher.encrypt_chunk(bytes_chunk)?;
 
         let document = TelegramBotApi::new(self.telegram_baseurl, scheduler)
-            .upload(bytes_chunk, chat_id, storage_id)
+            .upload(&encrypted_chunk, chat_id, storage_id)
             .await?;
 
         tracing::debug!(
@@ -124,7 +134,11 @@ impl<'d> StorageManagerService<'d> {
         let file = TelegramBotApi::new(self.telegram_baseurl, scheduler)
             .download(&chunk.telegram_file_id, storage_id)
             .await
-            .map(|data| DownloadedChunkSchema::new(chunk.position, data))?;
+            .and_then(|data| {
+                self.cipher
+                    .decrypt_chunk(&data)
+                    .map(|decrypted| DownloadedChunkSchema::new(chunk.position, decrypted))
+            })?;
 
         tracing::debug!(
             "[TELEGRAM API] downloaded chunk with file_id \"{}\" and position \"{}\"",
