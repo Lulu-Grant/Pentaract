@@ -13,3 +13,9 @@ target/
 
 .vscode
 .DS_Store
+
+# Local deployment keys and private credentials
+id_ed25519
+*_id_ed25519
+*.pem
+*.key
