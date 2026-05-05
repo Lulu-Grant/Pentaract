@@ -7,6 +7,8 @@
 
 _Cloud storage system based on using Telegram as a storage so it doesn't use your server filesystem or any other paid cloud storage system underneath the hood._
 
+> Fork note: this fork adds encrypted Telegram-at-rest chunks, Docker deployment fixes, and optional same-file redundancy across multiple storages. The upstream project is [Dominux/Pentaract](https://github.com/Dominux/Pentaract).
+
 **BTC**: `18mquj59AcB4y4VBevdn5HekG5y7gvPYGk`
 
 **TON**: `UQDoGRgUIEDA30cko8k-icnI8S5i8QIq2jFvqswNvVUc9F2U`
@@ -18,6 +20,46 @@ https://github.com/Dominux/Pentaract/assets/55978340/b62305a7-cae3-4e1c-a509-38e
 Pentaract is aimed to take as small disk space as possible. So it does not need any code interpreter/platform to run. The whole app is just several megabytes in size. It also uses Postgres as a database and we try our best to economy space by not creating unneeded fields and tables and to wisely pick proper datatypes.
 
 The platform itself can be used differently, like as a personal (on your own server or a local machine) platform or a platform for many users with multiple storages and so on. Since it provides Rest API, you can also use it as a file system in your backend like [NextCloud](https://nextcloud.com/) or [AWS S3](https://aws.amazon.com/s3/) or S3 compatable services (like [MinIO](https://min.io/)), but for now it's so early so I don't recommend to use it in production ready apps.
+
+# Fork updates
+
+This fork keeps the original Telegram-backed storage model and adds the following operational changes:
+
+- File chunks are encrypted before they are uploaded to Telegram. Telegram chats contain encrypted binary payloads instead of readable user files.
+- Downloads decrypt chunks inside Pentaract, so the cloud storage UI and API still return normal files.
+- `file_chunks` now represents logical chunks. Physical Telegram uploads live in `file_chunk_replicas`.
+- Storage disaster recovery can be configured with `storage_replicas`, allowing new uploads to write the same encrypted chunk to the primary storage and one or more replica storages.
+- Downloads try the requested storage first and then fall back to available replicas if one copy cannot be downloaded.
+
+## Encryption key
+
+Set `STORAGE_ENCRYPTION_KEY` in the environment before running the app. It must be a 64-character hex-encoded 32-byte key:
+
+```sh
+openssl rand -hex 32
+```
+
+Keep this value backed up. Existing encrypted files cannot be decrypted if the key is lost or changed.
+
+## Redundant storage API
+
+Replica storage relationships are managed per storage:
+
+```http
+GET    /api/storages/:storage_id/replicas
+POST   /api/storages/:storage_id/replicas
+DELETE /api/storages/:storage_id/replicas
+```
+
+`POST` and `DELETE` use this JSON body:
+
+```json
+{
+  "replica_storage_id": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+The user must have admin access to the source storage. Adding a replica also requires admin access to the replica storage. Each replica storage should have its own Telegram supergroup/channel and at least one storage worker bot.
 
 # Installation
 
@@ -80,6 +122,7 @@ ACCESS_TOKEN_EXPIRE_IN_SECS=1800
 REFRESH_TOKEN_EXPIRE_IN_DAYS=14
 SECRET_KEY=<YOUR-SECRET-KEY>
 TELEGRAM_API_BASE_URL=https://api.telegram.org
+STORAGE_ENCRYPTION_KEY=<64-HEX-CHAR-KEY>
 
 DATABASE_USER=pentaract
 DATABASE_PASSWORD=pentaract
@@ -119,6 +162,12 @@ Kind of simple way, but it's aimed to use it during development process
 
 ```sh
 git clone git@github.com:Dominux/Pentaract.git
+```
+
+For this fork, use:
+
+```sh
+git clone git@github.com:Lulu-Grant/Pentaract.git
 ```
 
 2. Copy `.env.example` to `.env`:
@@ -174,6 +223,12 @@ mkdir ~/pentaract
 
 ```sh
 git clone git@github.com:Dominux/Pentaract.git
+```
+
+For this fork, use:
+
+```sh
+git clone git@github.com:Lulu-Grant/Pentaract.git
 ```
 
 3. Go to the `./pentaract` directory and build server side app:
