@@ -7,6 +7,7 @@ use crate::models::storages::{InStorage, Storage, StorageWithInfo};
 use crate::repositories::{access::TABLE as ACCESS_TABLE, files::FILES_TABLE};
 
 pub const TABLE: &str = "storages";
+pub const STORAGE_REPLICAS_TABLE: &str = "storage_replicas";
 
 pub struct StoragesRepository<'d> {
     db: &'d PgPool,
@@ -104,6 +105,88 @@ impl<'d> StoragesRepository<'d> {
         .fetch_one(self.db)
         .await
         .map_err(|e| map_not_found(e, "storage"))
+    }
+
+    pub async fn add_replica(
+        &self,
+        source_storage_id: Uuid,
+        replica_storage_id: Uuid,
+    ) -> PentaractResult<()> {
+        sqlx::query(
+            format!(
+                "
+                INSERT INTO {STORAGE_REPLICAS_TABLE} (source_storage_id, replica_storage_id)
+                VALUES ($1, $2)
+                ON CONFLICT DO NOTHING
+            "
+            )
+            .as_str(),
+        )
+        .bind(source_storage_id)
+        .bind(replica_storage_id)
+        .execute(self.db)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::Database(dbe) if dbe.is_foreign_key_violation() => {
+                PentaractError::DoesNotExist("storage".to_string())
+            }
+            sqlx::Error::Database(dbe) if dbe.is_check_violation() => {
+                PentaractError::InvalidStorageReplica
+            }
+            _ => {
+                tracing::error!("{e}");
+                PentaractError::Unknown
+            }
+        })?;
+
+        Ok(())
+    }
+
+    pub async fn list_replicas(&self, source_storage_id: Uuid) -> PentaractResult<Vec<Storage>> {
+        sqlx::query_as(
+            format!(
+                "
+                SELECT s.*
+                FROM {TABLE} s
+                JOIN {STORAGE_REPLICAS_TABLE} sr ON sr.replica_storage_id = s.id
+                WHERE sr.source_storage_id = $1
+            "
+            )
+            .as_str(),
+        )
+        .bind(source_storage_id)
+        .fetch_all(self.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("{e}");
+            PentaractError::Unknown
+        })
+    }
+
+    pub async fn delete_replica(
+        &self,
+        source_storage_id: Uuid,
+        replica_storage_id: Uuid,
+    ) -> PentaractResult<()> {
+        sqlx::query(
+            format!(
+                "
+                DELETE FROM {STORAGE_REPLICAS_TABLE}
+                WHERE source_storage_id = $1 AND replica_storage_id = $2
+            "
+            )
+            .as_str(),
+        )
+        .bind(source_storage_id)
+        .bind(replica_storage_id)
+        .execute(self.db)
+        .await
+        .map_err(|e| {
+            tracing::error!("{e}");
+            PentaractError::Unknown
+        })?;
+
+        Ok(())
     }
 
     pub async fn delete_storage(&self, storage_id: Uuid) -> PentaractResult<()> {

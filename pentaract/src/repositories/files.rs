@@ -1,15 +1,16 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use sqlx::{PgPool, QueryBuilder};
 use uuid::Uuid;
 
 use crate::common::db::errors::map_not_found;
 use crate::errors::{PentaractError, PentaractResult};
-use crate::models::file_chunks::FileChunk;
+use crate::models::file_chunks::{FileChunk, FileChunkReplica, FileChunkWithReplicas};
 use crate::models::files::{DBFSElement, FSElement, File, InFile, SearchFSElement};
 
 pub const FILES_TABLE: &str = "files";
 pub const CHUNKS_TABLE: &str = "file_chunks";
+pub const CHUNK_REPLICAS_TABLE: &str = "file_chunk_replicas";
 
 /// General repo for files and chunks since they share common logic
 pub struct FilesRepository<'d> {
@@ -165,21 +166,64 @@ impl<'d> FilesRepository<'d> {
         })
     }
 
-    pub async fn create_chunks_batch(&self, chunks: Vec<FileChunk>) -> PentaractResult<()> {
-        QueryBuilder::new(
-            format!("INSERT INTO {CHUNKS_TABLE} (id, file_id, telegram_file_id, position)")
+    pub async fn create_chunks_batch(
+        &self,
+        chunks: Vec<FileChunkWithReplicas>,
+    ) -> PentaractResult<()> {
+        if chunks.is_empty() {
+            return Ok(());
+        }
+
+        let mut transaction = self.db.begin().await.map_err(|e| {
+            tracing::error!("{e}");
+            PentaractError::Unknown
+        })?;
+
+        QueryBuilder::new(format!("INSERT INTO {CHUNKS_TABLE} (id, file_id, position)").as_str())
+            .push_values(chunks.iter().map(|chunk| &chunk.chunk), |mut q, chunk| {
+                q.push_bind(chunk.id)
+                    .push_bind(chunk.file_id)
+                    .push_bind(chunk.position);
+            })
+            .build()
+            .execute(&mut *transaction)
+            .await
+            .map_err(|e| {
+                tracing::error!("{e}");
+                PentaractError::Unknown
+            })?;
+
+        let replicas: Vec<_> = chunks
+            .iter()
+            .flat_map(|chunk| chunk.replicas.iter())
+            .collect();
+
+        if !replicas.is_empty() {
+            QueryBuilder::new(
+                format!(
+                    "INSERT INTO {CHUNK_REPLICAS_TABLE} (id, chunk_id, storage_id, telegram_file_id)"
+                )
                 .as_str(),
-        )
-        .push_values(chunks, |mut q, chunk| {
-            q.push_bind(chunk.id)
-                .push_bind(chunk.file_id)
-                .push_bind(chunk.telegram_file_id)
-                .push_bind(chunk.position);
-        })
-        .build()
-        .execute(self.db)
-        .await
-        .map_err(|_| PentaractError::Unknown)?;
+            )
+            .push_values(replicas, |mut q, replica| {
+                q.push_bind(replica.id)
+                    .push_bind(replica.chunk_id)
+                    .push_bind(replica.storage_id)
+                    .push_bind(&replica.telegram_file_id);
+            })
+            .build()
+            .execute(&mut *transaction)
+            .await
+            .map_err(|e| {
+                tracing::error!("{e}");
+                PentaractError::Unknown
+            })?;
+        }
+
+        transaction.commit().await.map_err(|e| {
+            tracing::error!("{e}");
+            PentaractError::Unknown
+        })?;
 
         Ok(())
     }
@@ -287,12 +331,53 @@ impl<'d> FilesRepository<'d> {
         .map_err(|e| map_not_found(e, "file"))
     }
 
-    pub async fn list_chunks_of_file(&self, file_id: Uuid) -> PentaractResult<Vec<FileChunk>> {
-        sqlx::query_as(format!("SELECT * FROM {CHUNKS_TABLE} WHERE file_id = $1").as_str())
-            .bind(file_id)
-            .fetch_all(self.db)
-            .await
-            .map_err(|e| map_not_found(e, "file chunks"))
+    pub async fn list_chunks_of_file(
+        &self,
+        file_id: Uuid,
+    ) -> PentaractResult<Vec<FileChunkWithReplicas>> {
+        let chunks: Vec<FileChunk> = sqlx::query_as(
+            format!("SELECT id, file_id, position FROM {CHUNKS_TABLE} WHERE file_id = $1").as_str(),
+        )
+        .bind(file_id)
+        .fetch_all(self.db)
+        .await
+        .map_err(|e| map_not_found(e, "file chunks"))?;
+
+        if chunks.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let chunk_ids: Vec<_> = chunks.iter().map(|chunk| chunk.id).collect();
+        let replicas: Vec<FileChunkReplica> = sqlx::query_as(
+            format!(
+                "
+                SELECT id, chunk_id, storage_id, telegram_file_id
+                FROM {CHUNK_REPLICAS_TABLE}
+                WHERE chunk_id = ANY($1)
+            "
+            )
+            .as_str(),
+        )
+        .bind(&chunk_ids)
+        .fetch_all(self.db)
+        .await
+        .map_err(|e| map_not_found(e, "file chunk replicas"))?;
+
+        let mut replicas_by_chunk_id: HashMap<Uuid, Vec<FileChunkReplica>> = HashMap::new();
+        for replica in replicas {
+            replicas_by_chunk_id
+                .entry(replica.chunk_id)
+                .or_default()
+                .push(replica);
+        }
+
+        Ok(chunks
+            .into_iter()
+            .map(|chunk| {
+                let replicas = replicas_by_chunk_id.remove(&chunk.id).unwrap_or_default();
+                FileChunkWithReplicas { chunk, replicas }
+            })
+            .collect())
     }
 
     pub async fn set_as_uploaded(&self, file_id: Uuid) -> PentaractResult<()> {

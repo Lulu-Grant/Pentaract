@@ -11,6 +11,7 @@ use crate::{
     repositories::{access::AccessRepository, storages::StoragesRepository},
     schemas::{
         access::{GrantAccess, RestrictAccess},
+        storages::InStorageReplicaSchema,
         storages::InStorageSchema,
     },
 };
@@ -66,6 +67,45 @@ impl<'d> StoragesService<'d> {
         check_access(&self.access_repo, user.id, id, &AccessType::R).await?;
 
         self.repo.get_by_id(id).await
+    }
+
+    pub async fn add_replica(
+        &self,
+        id: Uuid,
+        in_schema: InStorageReplicaSchema,
+        user: &AuthUser,
+    ) -> PentaractResult<()> {
+        check_access(&self.access_repo, user.id, id, &AccessType::A).await?;
+        check_access(
+            &self.access_repo,
+            user.id,
+            in_schema.replica_storage_id,
+            &AccessType::A,
+        )
+        .await?;
+
+        self.repo
+            .add_replica(id, in_schema.replica_storage_id)
+            .await
+    }
+
+    pub async fn list_replicas(&self, id: Uuid, user: &AuthUser) -> PentaractResult<Vec<Storage>> {
+        check_access(&self.access_repo, user.id, id, &AccessType::R).await?;
+
+        self.repo.list_replicas(id).await
+    }
+
+    pub async fn delete_replica(
+        &self,
+        id: Uuid,
+        in_schema: InStorageReplicaSchema,
+        user: &AuthUser,
+    ) -> PentaractResult<()> {
+        check_access(&self.access_repo, user.id, id, &AccessType::A).await?;
+
+        self.repo
+            .delete_replica(id, in_schema.replica_storage_id)
+            .await
     }
 
     pub async fn delete(&self, id: Uuid, user: &AuthUser) -> PentaractResult<()> {

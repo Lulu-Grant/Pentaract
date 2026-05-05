@@ -47,6 +47,9 @@ pub async fn init_db(db: &PgPool) {
 
     for statement in [
         "
+        CREATE EXTENSION IF NOT EXISTS pgcrypto;
+    ",
+        "
         CREATE TABLE IF NOT EXISTS users (
             id            UUID         PRIMARY KEY,
             email         VARCHAR(255) NOT NULL UNIQUE,
@@ -121,9 +124,53 @@ pub async fn init_db(db: &PgPool) {
             file_id          UUID         NOT NULL REFERENCES files 
                                                 ON DELETE CASCADE 
                                                 ON UPDATE CASCADE,
-            telegram_file_id VARCHAR(255) NOT NULL,
+            telegram_file_id VARCHAR(255),
             position         SmallInt     NOT NULL
         );
+    ",
+        "
+        CREATE TABLE IF NOT EXISTS file_chunk_replicas (
+            id               UUID         PRIMARY KEY,
+            chunk_id         UUID         NOT NULL REFERENCES file_chunks
+                                                ON DELETE CASCADE
+                                                ON UPDATE CASCADE,
+            storage_id       UUID         NOT NULL REFERENCES storages
+                                                ON DELETE CASCADE
+                                                ON UPDATE CASCADE,
+            telegram_file_id VARCHAR(255) NOT NULL,
+
+            UNIQUE(chunk_id, storage_id)
+        );
+    ",
+        "
+        CREATE TABLE IF NOT EXISTS storage_replicas (
+            source_storage_id  UUID NOT NULL REFERENCES storages
+                                            ON DELETE CASCADE
+                                            ON UPDATE CASCADE,
+            replica_storage_id UUID NOT NULL REFERENCES storages
+                                            ON DELETE CASCADE
+                                            ON UPDATE CASCADE,
+
+            PRIMARY KEY(source_storage_id, replica_storage_id),
+            CHECK(source_storage_id <> replica_storage_id)
+        );
+    ",
+        "
+        ALTER TABLE file_chunks
+        ALTER COLUMN telegram_file_id DROP NOT NULL;
+    ",
+        "
+        INSERT INTO file_chunk_replicas (id, chunk_id, storage_id, telegram_file_id)
+        SELECT gen_random_uuid(), fc.id, f.storage_id, fc.telegram_file_id
+        FROM file_chunks fc
+        JOIN files f ON f.id = fc.file_id
+        WHERE fc.telegram_file_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM file_chunk_replicas fcr
+              WHERE fcr.chunk_id = fc.id
+                AND fcr.storage_id = f.storage_id
+          );
     ",
         "
         CREATE TABLE IF NOT EXISTS storage_workers_usages (

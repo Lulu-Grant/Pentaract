@@ -35,6 +35,8 @@ pub enum PentaractError {
     InvalidFolderName,
     #[error("Invalid encryption key")]
     InvalidEncryptionKey,
+    #[error("Storage cannot replicate to itself")]
+    InvalidStorageReplica,
     #[error("File encryption failed")]
     EncryptionError,
     #[error("File decryption failed")]
@@ -66,7 +68,8 @@ impl From<PentaractError> for (StatusCode, String) {
             PentaractError::HeaderMissed(_)
             | PentaractError::HeaderIsInvalid(..)
             | PentaractError::InvalidFolderName
-            | PentaractError::InvalidEncryptionKey => (StatusCode::BAD_REQUEST, e.to_string()),
+            | PentaractError::InvalidEncryptionKey
+            | PentaractError::InvalidStorageReplica => (StatusCode::BAD_REQUEST, e.to_string()),
             _ => {
                 tracing::error!("{e}");
                 (

@@ -18,7 +18,9 @@ use crate::{
     models::storages::Storage,
     schemas::{
         access::{GrantAccess, RestrictAccess},
-        storages::{InStorageSchema, StoragesListSchema},
+        storages::{
+            InStorageReplicaSchema, InStorageSchema, StorageReplicasSchema, StoragesListSchema,
+        },
     },
     services::storages::StoragesService,
 };
@@ -33,6 +35,12 @@ impl StoragesRouter {
         Router::new()
             .route("/", get(Self::list).post(Self::create))
             .route("/:storage_id", get(Self::get).delete(Self::delete))
+            .route(
+                "/:storage_id/replicas",
+                get(Self::list_replicas)
+                    .post(Self::add_replica)
+                    .delete(Self::delete_replica),
+            )
             .route(
                 "/:storage_id/access",
                 get(Self::list_users_with_access)
@@ -84,6 +92,42 @@ impl StoragesRouter {
         Path(id): Path<Uuid>,
     ) -> Result<StatusCode, (StatusCode, String)> {
         StoragesService::new(&state.db).delete(id, &user).await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    async fn add_replica(
+        State(state): State<Arc<AppState>>,
+        Extension(user): Extension<AuthUser>,
+        Path(id): Path<Uuid>,
+        Json(in_schema): Json<InStorageReplicaSchema>,
+    ) -> Result<StatusCode, (StatusCode, String)> {
+        StoragesService::new(&state.db)
+            .add_replica(id, in_schema, &user)
+            .await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+
+    async fn list_replicas(
+        State(state): State<Arc<AppState>>,
+        Extension(user): Extension<AuthUser>,
+        Path(id): Path<Uuid>,
+    ) -> impl IntoResponse {
+        let replicas = StoragesService::new(&state.db)
+            .list_replicas(id, &user)
+            .await
+            .map(StorageReplicasSchema::new)?;
+        Ok::<_, (StatusCode, String)>(Json(replicas))
+    }
+
+    async fn delete_replica(
+        State(state): State<Arc<AppState>>,
+        Extension(user): Extension<AuthUser>,
+        Path(id): Path<Uuid>,
+        Json(in_schema): Json<InStorageReplicaSchema>,
+    ) -> Result<StatusCode, (StatusCode, String)> {
+        StoragesService::new(&state.db)
+            .delete_replica(id, in_schema, &user)
+            .await?;
         Ok(StatusCode::NO_CONTENT)
     }
 
