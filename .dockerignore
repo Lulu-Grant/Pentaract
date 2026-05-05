@@ -1,0 +1,11 @@
+.git
+.env
+172.236.144.52_id_ed25519
+
+target
+pentaract/target
+
+ui/node_modules
+ui/dist
+
+**/.DS_Store

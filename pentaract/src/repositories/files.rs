@@ -69,21 +69,19 @@ impl<'d> FilesRepository<'d> {
     pub async fn create_file_anyway(&self, in_obj: InFile) -> PentaractResult<File> {
         let id = Uuid::new_v4();
 
-        // lol/kek/sdf.nj.dskf/sdkl.fdsklf/lol .kek.dsf
         let (path_with_stem, suffix) = {
             let mut splited_path: Vec<_> = in_obj.path.split("/").collect();
-            let last = splited_path.last_mut().unwrap();
-            let mut suffix = String::new();
-            (*last, suffix) = last
-                .split_once(".")
-                .map(|(stem, suffix)| (stem, format!(".{suffix}")))
-                .unwrap_or((last, "".to_owned()));
+            let last = splited_path.last_mut().ok_or(PentaractError::InvalidPath)?;
+            let suffix = if let Some((stem, suffix)) = last.rsplit_once(".") {
+                *last = stem;
+                format!(".{suffix}")
+            } else {
+                String::new()
+            };
             (splited_path.join("/"), suffix)
         };
 
-        println!("{path_with_stem} {suffix}");
-
-        let chars_to_skip = path_with_stem.len() + 3; // if the name is `kek` then it's gonna be a len of `kek (` + 1
+        let chars_to_skip = path_with_stem.len() + 3; // stem plus " ("
         let skip_chars_from_back = chars_to_skip + suffix.len();
 
         // https://www.db-fiddle.com/f/i6XCvTSi5cpAVu5AAfiNqm/16

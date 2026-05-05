@@ -91,7 +91,7 @@ const Files = () => {
 	onMount(() => {
 		Promise.all([fetchStorage(), fetchFSLayer()]).then()
 
-		// Either me or the solidjs-router creator is dumb af so I have to use this sht
+		// Keep the file list in sync when navigating with browser history.
 		window.addEventListener('popstate', reload, false)
 	})
 

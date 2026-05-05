@@ -16,10 +16,11 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder 
 COPY --from=planner /app/recipe.json recipe.json
 # Build dependencies - this is the caching Docker layer!
-RUN cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
 # Build application
 COPY ./pentaract .
-RUN cargo build --target x86_64-unknown-linux-musl --release
+RUN cargo build --release
+RUN cp "$(find /app/target -path '*/release/pentaract' -type f | head -n 1)" /pentaract-bin
 
 ############################################################################################
 ####  UI
@@ -28,8 +29,8 @@ RUN cargo build --target x86_64-unknown-linux-musl --release
 FROM node:21-slim AS ui
 WORKDIR /app
 COPY ./ui .
-RUN npm install -g pnpm
-RUN pnpm i
+RUN npm install -g pnpm@8.15.9
+RUN pnpm install --frozen-lockfile
 ENV VITE_API_BASE /api
 RUN pnpm run build
 
@@ -39,7 +40,7 @@ RUN pnpm run build
 
 # We do not need the Rust toolchain to run the binary!
 FROM scratch AS runtime
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/pentaract /
+COPY --from=builder /pentaract-bin /pentaract
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=ui /app/dist /ui
 ENTRYPOINT ["/pentaract"]

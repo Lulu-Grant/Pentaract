@@ -90,26 +90,30 @@ impl FilesRouter {
             let (mut file, mut filename, mut path) = (None, None, None);
 
             // parsing
-            while let Some(field) = multipart.next_field().await.unwrap() {
-                let name = field.name().unwrap().to_owned();
+            while let Some(field) = multipart.next_field().await.map_err(Self::bad_request)? {
+                let name = field.name().unwrap_or_default().to_owned();
                 let field_filename = field.file_name().unwrap_or("unnamed").to_owned();
-                let data = field.bytes().await.unwrap();
+                let data = field.bytes().await.map_err(Self::bad_request)?;
 
                 match name.as_str() {
                     "file" => {
                         file = Some(data);
                         filename = Some(field_filename);
                     }
-                    "path" => path = Some(String::from_utf8(data.to_vec()).unwrap()),
-                    // don't give a fuck about other fields
+                    "path" => {
+                        path = Some(String::from_utf8(data.to_vec()).map_err(|_| {
+                            (StatusCode::BAD_REQUEST, "Path cannot be parsed".to_owned())
+                        })?)
+                    }
                     _ => (),
                 }
             }
 
             let file = file.ok_or((StatusCode::BAD_REQUEST, "file file is required".to_owned()))?;
+            let filename = filename.unwrap_or_else(|| "unnamed".to_owned());
             let path = path
                 .ok_or((StatusCode::BAD_REQUEST, "path file is required".to_owned()))
-                .map(|path| Self::construct_path(&path, &filename.unwrap()))??;
+                .map(|path| Self::construct_path(&path, &filename))??;
             (file, path)
         };
         let size = file.len() as i64;
@@ -132,9 +136,9 @@ impl FilesRouter {
             let mut body_parts = HashMap::with_capacity(IN_FILE_SCHEMA_FIELDS_AMOUNT);
 
             // parsing
-            while let Some(field) = multipart.next_field().await.unwrap() {
-                let name = field.name().unwrap().to_string();
-                let data = field.bytes().await.unwrap();
+            while let Some(field) = multipart.next_field().await.map_err(Self::bad_request)? {
+                let name = field.name().unwrap_or_default().to_string();
+                let data = field.bytes().await.map_err(Self::bad_request)?;
                 body_parts.insert(name, data);
             }
 
@@ -181,6 +185,11 @@ impl FilesRouter {
             .to_str()
             .ok_or(PentaractError::InvalidPath)
             .map(|p| p.to_string())
+    }
+
+    #[inline]
+    fn bad_request(err: impl std::fmt::Display) -> (StatusCode, String) {
+        (StatusCode::BAD_REQUEST, err.to_string())
     }
 
     async fn download(

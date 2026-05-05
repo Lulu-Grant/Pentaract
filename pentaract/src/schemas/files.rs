@@ -1,8 +1,8 @@
 use axum::body::Bytes;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::{common::types::Position, models::files::File};
+use crate::common::types::Position;
 
 #[derive(Deserialize)]
 pub struct UploadParams {

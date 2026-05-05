@@ -100,7 +100,7 @@ impl<'d> FilesService<'d> {
         // 3. saving file to db
         let file = self.repo.create_file(in_file).await?;
 
-        self._upload(file, in_schema.file, user).await
+        self._upload(file, in_schema.file).await
     }
 
     pub async fn upload_anyway(
@@ -124,17 +124,16 @@ impl<'d> FilesService<'d> {
         // 2. saving file in db
         let file = self.repo.create_file_anyway(in_file).await?;
 
-        self._upload(file, file_data, user).await
+        self._upload(file, file_data).await
     }
 
-    async fn _upload(&self, file: File, file_data: Bytes, user: &AuthUser) -> PentaractResult<()> {
+    async fn _upload(&self, file: File, file_data: Bytes) -> PentaractResult<()> {
         // 2. sending file to storage manager
         let (resp_tx, resp_rx) = oneshot::channel();
 
         let message = {
             let upload_file_data = UploadFileData {
                 file_id: file.id,
-                user_id: user.id,
                 file_data: file_data.as_ref().into(),
             };
             ClientMessage {
@@ -144,12 +143,25 @@ impl<'d> FilesService<'d> {
         };
 
         tracing::debug!("sending task to manager");
-        let _ = self.tx.send(message).await;
+        self.tx.send(message).await.map_err(|e| {
+            tracing::error!("storage manager request failed: {e}");
+            PentaractError::Unknown
+        })?;
 
         // 3. waiting for a storage manager result
-        let message_back = match resp_rx.await.unwrap().data {
+        let message_back = match resp_rx
+            .await
+            .map_err(|e| {
+                tracing::error!("storage manager response failed: {e}");
+                PentaractError::Unknown
+            })?
+            .data
+        {
             StorageManagerData::UploadFile(r) => r,
-            _ => unimplemented!(),
+            _ => {
+                tracing::error!("storage manager returned an unexpected response type");
+                Err(PentaractError::Unknown)
+            }
         };
         if let Err(e) = message_back.and({
             tracing::debug!("file loaded successfully");
@@ -204,7 +216,6 @@ impl<'d> FilesService<'d> {
             let download_file_data = DownloadFileData {
                 file_id: file.id,
                 storage_id,
-                user_id: user.id,
             };
             ClientMessage {
                 data: ClientData::DownloadFile(download_file_data),
@@ -213,12 +224,25 @@ impl<'d> FilesService<'d> {
         };
 
         tracing::debug!("sending task to manager");
-        let _ = self.tx.send(message).await;
+        self.tx.send(message).await.map_err(|e| {
+            tracing::error!("storage manager request failed: {e}");
+            PentaractError::Unknown
+        })?;
 
         // 4. waiting for a storage manager result
-        match resp_rx.await.unwrap().data {
+        match resp_rx
+            .await
+            .map_err(|e| {
+                tracing::error!("storage manager response failed: {e}");
+                PentaractError::Unknown
+            })?
+            .data
+        {
             StorageManagerData::DownloadFile(r) => r,
-            _ => unimplemented!(),
+            _ => {
+                tracing::error!("storage manager returned an unexpected response type");
+                Err(PentaractError::Unknown)
+            }
         }
     }
 

@@ -28,9 +28,7 @@ impl<'t> TelegramBotApi<'t> {
         storage_id: Uuid,
     ) -> PentaractResult<UploadSchema> {
         let chat_id = {
-            // inserting 100 between minus sign and chat id
-            // cause telegram devs are complete retards and it works this way only
-            //
+            // Telegram channel IDs need the -100 prefix in Bot API calls.
             // https://stackoverflow.com/a/65965402/12255756
 
             let n = chat_id.abs().checked_ilog10().unwrap_or(0) + 1;

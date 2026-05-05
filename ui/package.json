@@ -9,6 +9,7 @@
     "serve": "vite preview"
   },
   "license": "MIT",
+  "packageManager": "pnpm@8.15.9",
   "devDependencies": {
     "solid-devtools": "^0.27.3",
     "vite": "^4.3.9",
